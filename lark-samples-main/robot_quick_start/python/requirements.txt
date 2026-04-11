@@ -1,4 +1,6 @@
-Flask>=3.1,<4
+# Flask 2.0.x runs on Python 3.6+ (e.g. older Aliyun images). Flask 3.x needs Python 3.8+.
+Flask==2.0.3
+Werkzeug>=2.0,<3
 python-dotenv
 requests
 pycryptodome
