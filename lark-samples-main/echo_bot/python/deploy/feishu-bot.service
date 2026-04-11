@@ -1,0 +1,19 @@
+# 复制到 /etc/systemd/system/feishu-bot.service 后修改 User 与路径
+# sudo systemctl daemon-reload && sudo systemctl enable --now feishu-bot
+
+[Unit]
+Description=Feishu echo bot (WebSocket, echo_bot/python)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/lark-samples/echo_bot/python
+Environment=PATH=/home/ubuntu/lark-samples/echo_bot/python/.venv/bin:/usr/local/bin:/usr/bin
+ExecStart=/home/ubuntu/lark-samples/echo_bot/python/.venv/bin/python main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
