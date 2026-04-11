@@ -9,6 +9,7 @@ APP_SECRET = os.getenv("APP_SECRET")
 # const
 TENANT_ACCESS_TOKEN_URI = "/open-apis/auth/v3/tenant_access_token/internal"
 MESSAGE_URI = "/open-apis/im/v1/messages"
+MESSAGE_REPLY_SUFFIX = "/reply"
 
 
 class MessageApiClient(object):
@@ -24,6 +25,20 @@ class MessageApiClient(object):
 
     def send_text_with_open_id(self, open_id, content):
         self.send("open_id", open_id, "text", content)
+
+    def reply_text(self, message_id, content):
+        """Reply in a group or thread; content is Feishu text JSON string, e.g. {\"text\":\"...\"}."""
+        self._authorize_tenant_access_token()
+        url = "{}{}{}{}".format(
+            self._lark_host, MESSAGE_URI, "/", message_id
+        ) + MESSAGE_REPLY_SUFFIX
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + self.tenant_access_token,
+        }
+        req_body = {"content": content, "msg_type": "text"}
+        resp = requests.post(url=url, headers=headers, json=req_body)
+        MessageApiClient._check_error_response(resp)
 
     def send(self, receive_id_type, receive_id, msg_type, content):
         # send message to user, implemented based on Feishu open api capability. doc link: https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/message/create

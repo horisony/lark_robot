@@ -1,23 +1,27 @@
 #!/usr/bin/env python3.8
 
-import os
+import json
 import logging
+import os
 import requests
 from api import MessageApiClient
 from event import MessageReceiveEvent, UrlVerificationEvent, EventManager
 from flask import Flask, jsonify
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 
-# load env parameters form file named .env
-load_dotenv(find_dotenv())
+from llm_client import PackyApiError, chat_completion
+
+# Always load .env beside this file (Gunicorn cwd may differ).
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_BASE_DIR, ".env"))
 
 app = Flask(__name__)
 
 # load from env
 APP_ID = os.getenv("APP_ID")
 APP_SECRET = os.getenv("APP_SECRET")
-VERIFICATION_TOKEN = os.getenv("VERIFICATION_TOKEN")
-ENCRYPT_KEY = os.getenv("ENCRYPT_KEY")
+VERIFICATION_TOKEN = (os.getenv("VERIFICATION_TOKEN") or "").strip()
+ENCRYPT_KEY = (os.getenv("ENCRYPT_KEY") or "").strip()
 LARK_HOST = os.getenv("LARK_HOST")
 
 # init service
@@ -38,17 +42,41 @@ def message_receive_event_handler(req_data: MessageReceiveEvent):
     sender_id = req_data.event.sender.sender_id
     message = req_data.event.message
     if message.message_type != "text":
-        logging.warn("Other types of messages have not been processed yet")
+        logging.warning("Other types of messages have not been processed yet")
         return jsonify()
-        # get open_id and text_content
-    open_id = sender_id.open_id
-    text_content = message.content
-    # echo text message
-    message_api_client.send_text_with_open_id(open_id, text_content)
+
+    try:
+        body = json.loads(message.content)
+        user_text = body.get("text") or ""
+    except (TypeError, ValueError):
+        logging.warning("Failed to parse text message content")
+        return jsonify()
+
+    try:
+        reply_plain = chat_completion(user_text)
+    except PackyApiError as e:
+        reply_plain = str(e)
+    except Exception as e:
+        logging.exception("PackyAPI call failed: %s", e)
+        reply_plain = "模型调用失败，请稍后重试"
+
+    content_json = json.dumps({"text": reply_plain}, ensure_ascii=False)
+
+    chat_type = getattr(message, "chat_type", None) or "p2p"
+    if chat_type == "p2p":
+        open_id = sender_id.open_id
+        message_api_client.send_text_with_open_id(open_id, content_json)
+    else:
+        message_id = getattr(message, "message_id", None)
+        if not message_id:
+            logging.error("Missing message_id for non-p2p chat")
+            return jsonify()
+        message_api_client.reply_text(message_id, content_json)
+
     return jsonify()
 
 
-@app.errorhandler
+@app.errorhandler(Exception)
 def msg_error_handler(ex):
     logging.error(ex)
     response = jsonify(message=str(ex))

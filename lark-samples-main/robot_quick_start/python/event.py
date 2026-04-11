@@ -104,14 +104,15 @@ class EventManager(object):
 
     @staticmethod
     def _decrypt_data(encrypt_key, data):
+        if encrypt_key is None:
+            encrypt_key = ""
         encrypt_data = data.get("encrypt")
-        if encrypt_key == "" and encrypt_data is None:
-            # data haven't been encrypted
+        # Plain JSON body (e.g. url_verification curl, or encryption off in console)
+        if encrypt_data is None:
             return data
         if encrypt_key == "":
             raise Exception("ENCRYPT_KEY is necessary")
         cipher = AESCipher(encrypt_key)
-
         return json.loads(cipher.decrypt_string(encrypt_data))
 
 
