@@ -51,6 +51,17 @@ def main() -> None:
     )
     insecure = insecure_ans in ("y", "yes")
 
+    print()
+    print("PackyAPI：POST /v1/chat/completions（Bearer + OpenAI 兼容 JSON）")
+    packy_key = getpass("PACKY_API_KEY（必填，隐藏输入）: ").strip()
+    if not packy_key:
+        print("PACKY_API_KEY is required.")
+        raise SystemExit(1)
+    default_packy_base = "https://www.packyapi.com/v1"
+    packy_base = input(f"PACKY_API_BASE [{default_packy_base}]: ").strip() or default_packy_base
+    default_model = "claude-opus-4-6"
+    packy_model = input(f"PACKY_MODEL [{default_model}]: ").strip() or default_model
+
     lines = [
         f"APP_ID={_quote_env_value(app_id)}",
         f"APP_SECRET={_quote_env_value(app_secret)}",
@@ -61,6 +72,9 @@ def main() -> None:
         lines.append(f"FEISHU_SSL_CA_BUNDLE={_quote_env_value(ca_path)}")
     if insecure:
         lines.append("FEISHU_INSECURE_SSL=1")
+    lines.append(f"PACKY_API_KEY={_quote_env_value(packy_key)}")
+    lines.append(f"PACKY_API_BASE={_quote_env_value(packy_base)}")
+    lines.append(f"PACKY_MODEL={_quote_env_value(packy_model)}")
     lines.append("")
     text = "\n".join(lines)
     old_umask = os.umask(0o077)

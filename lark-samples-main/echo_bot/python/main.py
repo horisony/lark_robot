@@ -15,6 +15,8 @@ except ImportError:
 import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 
+from llm_client import PackyApiError, chat_completion
+
 
 def _lark_domain() -> str:
     return (os.getenv("LARK_DOMAIN") or "https://open.feishu.cn").strip() or "https://open.feishu.cn"
@@ -28,16 +30,20 @@ def do_p2_im_message_receive_v1(data: P2ImMessageReceiveV1) -> None:
     if data.event.message.message_type == "text":
         res_content = json.loads(data.event.message.content)["text"]
     else:
-        res_content = "解析消息失败，请发送文本消息\nparse message failed, please send text message"
+        res_content = ""
 
-    content = json.dumps(
-        {
-            "text": "收到你发送的消息："
-            + res_content
-            + "\nReceived message:"
-            + res_content
-        }
-    )
+    if not res_content.strip():
+        reply_plain = "请发送文本消息\nPlease send a text message"
+    else:
+        try:
+            reply_plain = chat_completion(res_content)
+        except PackyApiError as e:
+            reply_plain = str(e)
+        except Exception as e:
+            logging.exception("PackyAPI call failed: %s", e)
+            reply_plain = "模型调用失败，请稍后重试"
+
+    content = json.dumps({"text": reply_plain}, ensure_ascii=False)
 
     if data.event.message.chat_type == "p2p":
         request = (
@@ -119,6 +125,12 @@ def main() -> None:
     if not lark.APP_ID or not lark.APP_SECRET:
         print(
             "缺少 APP_ID 或 APP_SECRET。请设置环境变量，或复制 .env.example 为 .env 并填写，或运行 python3 wizard.py",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not (os.getenv("PACKY_API_KEY") or "").strip():
+        print(
+            "缺少 PACKY_API_KEY（PackyAPI Bearer Token）。请写入 .env，见 .env.example",
             file=sys.stderr,
         )
         sys.exit(1)

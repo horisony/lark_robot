@@ -1,6 +1,8 @@
-# 回声机器人
+# 回声机器人（长连接 + PackyAPI）
 
-开发文档：https://open.feishu.cn/document/uAjLw4CM/uMzNwEjLzcDMx4yM3ATM/develop-an-echo-bot/introduction
+用户文本经 **POST** `PACKY_API_BASE/chat/completions`（Bearer、`claude-opus-4-6` 等）得到回复再发回飞书。
+
+开发文档（长连接接入）：https://open.feishu.cn/document/uAjLw4CM/uMzNwEjLzcDMx4yM3ATM/develop-an-echo-bot/introduction
 
 ## 效果
 
@@ -19,11 +21,13 @@ Windows： `set APP_ID=<app_id>&set APP_SECRET=<app_secret>&bootstrap.bat`
 
 ### 方式二：`.env`（推荐）
 
-1. 复制 `.env.example` 为 `.env` 并填写 `APP_ID`、`APP_SECRET`，或运行 **`python3 wizard.py`**（`./wizard.sh`）。
+1. 复制 `.env.example` 为 `.env` 并填写 **`APP_ID`、`APP_SECRET`、`PACKY_API_KEY`**（PackyAPI Bearer Token），或运行 **`python3 wizard.py`**（`./wizard.sh`）。
 2. 安装依赖：`pip install -r requirements.txt`
 3. 启动：`python3 main.py`
 
-可选环境变量：`LARK_DOMAIN`（默认 `https://open.feishu.cn`，Lark 国际版常用 `https://open.larksuite.com`）、`LOG_LEVEL`。
+可选环境变量：`LARK_DOMAIN`（默认 `https://open.feishu.cn`）、`LOG_LEVEL`。
+
+**模型调用**：向 PackyAPI 发送 **POST** `{PACKY_API_BASE}/chat/completions`，`Content-Type: application/json`，`Authorization: Bearer <PACKY_API_KEY>`，body 为 OpenAI 兼容格式（默认 `model=claude-opus-4-6`，`messages=[{role:user, content:用户原文}]`）。可通过 `PACKY_API_BASE`、`PACKY_MODEL` 覆盖。
 
 ### 方式三：Docker
 
@@ -61,6 +65,7 @@ docker compose up --build
 | 文件 | 说明 |
 |------|------|
 | `tls_extra.py` | 企业 TLS 补丁，在 `main()` 里、`wsClient.start()` 前执行 |
+| `llm_client.py` | PackyAPI `POST .../chat/completions`（Bearer + JSON） |
 | `wizard.py` / `wizard.sh` | 交互生成 `.env` |
 | `.env.example` | 环境变量模板 |
 | `Dockerfile` / `docker-compose.yml` | 容器运行 |
