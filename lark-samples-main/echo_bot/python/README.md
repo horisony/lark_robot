@@ -1,6 +1,6 @@
 # 回声机器人（长连接 + PackyAPI）
 
-用户文本经 **POST** `PACKY_API_BASE/chat/completions`（Bearer、`claude-opus-4-6` 等）得到回复再发回飞书。
+用户文本优先经 **MiniMax**（Anthropic 兼容：`ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` + `MiniMax-M2.7` 等）；失败时若配置了 **Packy**，则回退 **POST** `PACKY_API_BASE/chat/completions`。
 
 开发文档（长连接接入）：https://open.feishu.cn/document/uAjLw4CM/uMzNwEjLzcDMx4yM3ATM/develop-an-echo-bot/introduction
 
@@ -21,13 +21,17 @@ Windows： `set APP_ID=<app_id>&set APP_SECRET=<app_secret>&bootstrap.bat`
 
 ### 方式二：`.env`（推荐）
 
-1. 复制 `.env.example` 为 `.env` 并填写 **`APP_ID`、`APP_SECRET`、`PACKY_API_KEY`**（PackyAPI Bearer Token），或运行 **`python3 wizard.py`**（`./wizard.sh`）。
+1. 复制 `.env.example` 为 `.env`，至少配置 **`APP_ID`、`APP_SECRET`**，以及 **`ANTHROPIC_API_KEY`（MiniMax）和/或 `PACKY_API_KEY`（备用）**；或运行 **`python3 wizard.py`**。
 2. 安装依赖：`pip install -r requirements.txt`
 3. 启动：`python3 main.py`
 
-可选环境变量：`LARK_DOMAIN`（默认 `https://open.feishu.cn`）、`LOG_LEVEL`。
+可选环境变量：`LARK_DOMAIN`、`LOG_LEVEL`。
 
-**模型调用**：向 PackyAPI 发送 **POST** `{PACKY_API_BASE}/chat/completions`，`Content-Type: application/json`，`Authorization: Bearer <PACKY_API_KEY>`，body 为 OpenAI 兼容格式（默认 `model=claude-opus-4-6`，`messages=[{role:user, content:用户原文}]`）。可通过 `PACKY_API_BASE`、`PACKY_MODEL` 覆盖。
+**模型优先级**：若配置了 `ANTHROPIC_API_KEY`（或 `MINIMAX_API_KEY`），优先走 MiniMax 官方 **Anthropic 兼容** 接口（默认 `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic`，`MINIMAX_MODEL=MiniMax-M2.7`）。调用失败且配置了 `PACKY_API_KEY` 时，回退 **OpenAI 兼容** `POST .../chat/completions`（Packy 等）。仅配 Packy 则只走 Packy。
+
+若在日志里看到 **`processor not found, type: im.message.message_read_v1`**：表示开放平台订阅了 **消息已读** 事件，但代码未处理；当前已注册空处理器。若不需要已读事件，也可在开放平台 **事件订阅** 中取消 `im.message.message_read_v1` 以减少无关推送。
+
+若飞书里看到 **`Packy 备用接口不可用（HTTP 403）`**：这是 **回退通道 Packy** 被拒绝（密钥/额度/封禁等），不一定是 MiniMax 的问题。请查看容器日志里是否先有 **MiniMax 调用失败**；调试时可 **`LLM_DISABLE_PACKY_FALLBACK=1`** 或 **暂时去掉 `PACKY_API_KEY`**，只测 MiniMax。并确认 Docker 里已加载 `ANTHROPIC_API_KEY`：`docker compose exec echo-bot env | grep ANTHROPIC`。
 
 ### 方式三：Docker
 

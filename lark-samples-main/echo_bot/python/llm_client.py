@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""OpenAI-compatible POST /chat/completions → PackyAPI."""
+"""
+多模型：优先 MiniMax（Anthropic 兼容 API），失败则回退 Packy（OpenAI 兼容 /chat/completions）。
+"""
+from __future__ import annotations
+
 import json
 import logging
 import os
+from typing import Any
 
 import requests
 
@@ -10,16 +15,70 @@ _MAX_REPLY_CHARS = 12000
 
 
 class PackyApiError(Exception):
+    """LLM 调用失败（历史名称，含 MiniMax / Packy）。"""
+
     def __init__(self, message, status_code=None):
         super().__init__(message)
         self.status_code = status_code
 
 
-def chat_completion(user_text: str) -> str:
-    """
-    POST https://www.packyapi.com/v1/chat/completions (base configurable).
-    Bearer token + JSON: model, messages[{role,user,content}].
-    """
+def _truncate(text: str) -> str:
+    text = text.strip()
+    if len(text) > _MAX_REPLY_CHARS:
+        return text[:_MAX_REPLY_CHARS] + "\n…（已截断）"
+    return text
+
+
+def _anthropic_message_to_text(message: Any) -> str:
+    parts: list[str] = []
+    for block in message.content:
+        t = getattr(block, "type", None)
+        if t == "text":
+            parts.append(getattr(block, "text", "") or "")
+    s = "".join(parts).strip()
+    if s:
+        return _truncate(s)
+    raise PackyApiError("MiniMax 无文本回复（仅 thinking 等）")
+
+
+def _minimax_anthropic(user_text: str) -> str:
+    """MiniMax via Anthropic-compatible API (官方文档 base_url + messages.create)."""
+    import anthropic
+
+    logging.info("LLM: calling MiniMax via Anthropic-compatible API (base=%s)", os.getenv("ANTHROPIC_BASE_URL", "https://api.minimax.io/anthropic"))
+
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or os.getenv("MINIMAX_API_KEY") or "").strip()
+    if not api_key:
+        raise PackyApiError("ANTHROPIC_API_KEY / MINIMAX_API_KEY is not set")
+
+    base = (os.getenv("ANTHROPIC_BASE_URL") or "https://api.minimax.io/anthropic").rstrip("/")
+    model = (os.getenv("MINIMAX_MODEL") or "MiniMax-M2.7").strip()
+    max_tokens = int(os.getenv("MINIMAX_MAX_TOKENS") or "4096")
+    system = (
+        os.getenv("MINIMAX_SYSTEM")
+        or os.getenv("SYSTEM_PROMPT")
+        or "You are a helpful assistant."
+    ).strip()
+
+    client = anthropic.Anthropic(api_key=api_key, base_url=base)
+    message = client.messages.create(
+        model=model,
+        max_tokens=max_tokens,
+        system=system,
+        messages=[
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": user_text}],
+            }
+        ],
+    )
+    return _anthropic_message_to_text(message)
+
+
+def _packy_openai(user_text: str) -> str:
+    """OpenAI-compatible POST .../chat/completions（Packy 等）。"""
+    logging.info("LLM: calling Packy/OpenAI-compatible API (base=%s)", os.getenv("PACKY_API_BASE", "https://www.packyapi.com/v1"))
+
     api_key = (os.getenv("PACKY_API_KEY") or "").strip()
     base = (os.getenv("PACKY_API_BASE") or "https://www.packyapi.com/v1").rstrip("/")
     model = (os.getenv("PACKY_MODEL") or "claude-opus-4-6").strip()
@@ -41,9 +100,11 @@ def chat_completion(user_text: str) -> str:
 
     if resp.status_code != 200:
         snippet = (resp.text or "")[:500]
-        logging.error("PackyAPI HTTP %s: %s", resp.status_code, snippet)
+        logging.error("Packy(OpenAI兼容) HTTP %s: %s", resp.status_code, snippet)
         raise PackyApiError(
-            "模型服务暂时不可用（HTTP {}）".format(resp.status_code),
+            "Packy 备用接口不可用（HTTP {}），非 MiniMax 直连错误。响应片段: {}".format(
+                resp.status_code, snippet[:200]
+            ),
             status_code=resp.status_code,
         )
 
@@ -78,7 +139,53 @@ def chat_completion(user_text: str) -> str:
                 parts.append(p)
         content = "".join(parts)
 
-    text = str(content).strip()
-    if len(text) > _MAX_REPLY_CHARS:
-        text = text[: _MAX_REPLY_CHARS] + "\n…（已截断）"
-    return text
+    return _truncate(str(content))
+
+
+def _no_packy_fallback() -> bool:
+    return (os.getenv("LLM_DISABLE_PACKY_FALLBACK") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def chat_completion(user_text: str) -> str:
+    """
+    优先 MiniMax（已配置 ANTHROPIC_API_KEY 或 MINIMAX_API_KEY 时）；
+    失败则回退 Packy（PACKY_API_KEY），除非 LLM_DISABLE_PACKY_FALLBACK=1。
+    仅配其一则只走该路。
+    """
+    has_minimax = bool(
+        (os.getenv("ANTHROPIC_API_KEY") or os.getenv("MINIMAX_API_KEY") or "").strip()
+    )
+    has_packy = bool((os.getenv("PACKY_API_KEY") or "").strip())
+
+    if not has_minimax and not has_packy:
+        raise PackyApiError("请配置 ANTHROPIC_API_KEY（MiniMax）或 PACKY_API_KEY")
+
+    if has_minimax:
+        try:
+            return _minimax_anthropic(user_text)
+        except Exception as e:
+            logging.warning(
+                "MiniMax 调用失败，将尝试说明见下；是否回退 Packy=%s",
+                has_packy and not _no_packy_fallback(),
+                exc_info=True,
+            )
+            err_mini = "{}: {}".format(type(e).__name__, e)
+            if has_packy and not _no_packy_fallback():
+                try:
+                    return _packy_openai(user_text)
+                except Exception as e2:
+                    raise PackyApiError(
+                        "MiniMax 失败: {}；备用 Packy 也失败: {}: {}".format(
+                            err_mini, type(e2).__name__, e2
+                        )
+                    ) from e2
+            raise PackyApiError(
+                "MiniMax 失败（未使用或未成功 Packy 备用）: {}".format(err_mini)
+            ) from e
+
+    return _packy_openai(user_text)

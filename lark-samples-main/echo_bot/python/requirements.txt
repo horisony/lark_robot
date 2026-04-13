@@ -2,3 +2,5 @@ lark-oapi>=1.4.8
 python-dotenv>=1.0.0
 # SOCKS 代理下 websockets 需要 PyPI 包 python-socks（不是 PySocks）
 python-socks[asyncio]>=2.4.0
+# MiniMax Anthropic-compatible API
+anthropic>=0.40.0

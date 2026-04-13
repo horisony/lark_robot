@@ -52,15 +52,26 @@ def main() -> None:
     insecure = insecure_ans in ("y", "yes")
 
     print()
-    print("PackyAPI：POST /v1/chat/completions（Bearer + OpenAI 兼容 JSON）")
-    packy_key = getpass("PACKY_API_KEY（必填，隐藏输入）: ").strip()
-    if not packy_key:
-        print("PACKY_API_KEY is required.")
-        raise SystemExit(1)
+    print(
+        "模型：优先 MiniMax（Anthropic 兼容 API）。"
+        "至少配置 ANTHROPIC_API_KEY 或 PACKY_API_KEY 其一（可两者都配，失败时回退 Packy）。"
+    )
+    anthropic_key = getpass("ANTHROPIC_API_KEY（MiniMax，无则回车跳过）: ").strip()
+    minimax_model = "MiniMax-M2.7"
+    if anthropic_key:
+        minimax_model = input(f"MINIMAX_MODEL [{minimax_model}]: ").strip() or minimax_model
+
+    packy_key = getpass("PACKY_API_KEY（OpenAI 兼容备用，无则回车跳过）: ").strip()
     default_packy_base = "https://www.packyapi.com/v1"
-    packy_base = input(f"PACKY_API_BASE [{default_packy_base}]: ").strip() or default_packy_base
-    default_model = "claude-opus-4-6"
-    packy_model = input(f"PACKY_MODEL [{default_model}]: ").strip() or default_model
+    packy_base = default_packy_base
+    packy_model = "claude-opus-4-6"
+    if packy_key:
+        packy_base = input(f"PACKY_API_BASE [{default_packy_base}]: ").strip() or default_packy_base
+        packy_model = input(f"PACKY_MODEL [{packy_model}]: ").strip() or packy_model
+
+    if not anthropic_key and not packy_key:
+        print("至少需要 ANTHROPIC_API_KEY 或 PACKY_API_KEY。")
+        raise SystemExit(1)
 
     lines = [
         f"APP_ID={_quote_env_value(app_id)}",
@@ -72,9 +83,14 @@ def main() -> None:
         lines.append(f"FEISHU_SSL_CA_BUNDLE={_quote_env_value(ca_path)}")
     if insecure:
         lines.append("FEISHU_INSECURE_SSL=1")
-    lines.append(f"PACKY_API_KEY={_quote_env_value(packy_key)}")
-    lines.append(f"PACKY_API_BASE={_quote_env_value(packy_base)}")
-    lines.append(f"PACKY_MODEL={_quote_env_value(packy_model)}")
+    if anthropic_key:
+        lines.append("ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic")
+        lines.append(f"ANTHROPIC_API_KEY={_quote_env_value(anthropic_key)}")
+        lines.append(f"MINIMAX_MODEL={_quote_env_value(minimax_model)}")
+    if packy_key:
+        lines.append(f"PACKY_API_KEY={_quote_env_value(packy_key)}")
+        lines.append(f"PACKY_API_BASE={_quote_env_value(packy_base)}")
+        lines.append(f"PACKY_MODEL={_quote_env_value(packy_model)}")
     lines.append("")
     text = "\n".join(lines)
     old_umask = os.umask(0o077)
