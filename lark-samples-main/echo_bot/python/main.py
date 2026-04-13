@@ -56,6 +56,8 @@ from lark_oapi.api.im.v1 import *
 
 from llm_client import PackyApiError, chat_completion
 from skill_router import select_skill_system
+from skill_executor import execute_skill
+from session_store import get_session_store, SessionData
 
 # 长连接可能对同一事件至少投递一次以上：按 message_id + event_id 幂等去重
 _dedupe_lock = threading.Lock()
@@ -160,12 +162,50 @@ def _process_im_message(data: P2ImMessageReceiveV1) -> None:
     if not res_content.strip():
         reply_plain = "请发送文本消息\nPlease send a text message"
     else:
+        # 获取会话上下文
+        chat_id = getattr(msg, "chat_id", "unknown")
+        sender = getattr(data.event, "sender", None)
+        user_id = None
+        if sender:
+            sid = getattr(sender, "sender_id", None)
+            if sid:
+                user_id = getattr(sid, "open_id", None) or getattr(sid, "union_id", None)
+        
+        session_store = get_session_store()
+        session = session_store.get(chat_id)
+        
+        # 准备执行上下文
+        context = {
+            "chat_id": chat_id,
+            "user_id": user_id,
+            "message_id": mid,
+            "history": session.history[-10:],  # 最近 10 条消息
+            "vars": session.vars,
+        }
+        
+        # 保存用户消息到历史
+        session_store.add_message(chat_id, "user", res_content, {"message_id": mid})
+        
         try:
-            reply_plain = chat_completion(res_content, system=select_skill_system(res_content))
+            # 使用新的技能执行器
+            result = execute_skill(res_content, context)
+            
+            # 处理结果
+            if "error" in result:
+                reply_plain = f"技能执行失败：{result['error']}"
+                logging.error(f"Skill execution error: {result['error']}")
+            elif "text" in result:
+                reply_plain = result["text"]
+                # 保存助手回复到历史
+                session_store.add_message(chat_id, "assistant", reply_plain, {"message_id": mid})
+            else:
+                reply_plain = "技能未返回有效内容"
+                
         except PackyApiError as e:
             reply_plain = str(e)
-        except Exception as e:
             logging.exception("PackyAPI call failed: %s", e)
+        except Exception as e:
+            logging.exception("Skill execution failed: %s", e)
             reply_plain = "模型调用失败，请稍后重试"
 
     content = json.dumps({"text": reply_plain}, ensure_ascii=False)
