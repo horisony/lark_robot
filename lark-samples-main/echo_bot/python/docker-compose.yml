@@ -1,6 +1,54 @@
+version: '3.8'
+
 services:
-  echo-bot:
+  lark-bot:
     build: .
-    env_file:
-      - .env
-    restart: unless-stopped
+    container_name: lark-echo-bot
+    restart: always  # 自动重启
+    environment:
+      # 飞书配置（必填）
+      - APP_ID=${APP_ID}
+      - APP_SECRET=${APP_SECRET}
+      - LARK_DOMAIN=https://open.feishu.cn
+      
+      # 模型配置（必填其一）
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic
+      - MINIMAX_MODEL=MiniMax-M2.7
+      # 或
+      - PACKY_API_KEY=${PACKY_API_KEY}
+      - PACKY_API_BASE=https://www.packyapi.com/v1
+      - PACKY_MODEL=claude-opus-4-6
+      
+      # 技能配置
+      - SKILL_ROUTER=llm
+      - SKILL_DEFAULT=BaoAI-strategy
+      - SKILLS_DIR=/app/skills
+      
+      # 会话存储
+      - SESSION_STORE_DIR=/app/sessions
+      - SESSION_MAX_HISTORY=50
+      
+      # 日志
+      - LOG_LEVEL=INFO
+    
+    volumes:
+      # 持久化会话数据
+      - ./sessions:/app/sessions
+      # 可选：持久化日志
+      - ./logs:/app/logs
+    
+    networks:
+      - bot-network
+    
+    # 资源限制（可选）
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+networks:
+  bot-network:
+    driver: bridge
