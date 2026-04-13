@@ -9,15 +9,12 @@ import logging
 from typing import Dict, Any
 from pathlib import Path
 
-# 导入工具函数
 try:
-    from skill_executor import create_feishu_client
     from llm_client import chat_completion
 except ImportError:
     import sys
     _parent = Path(__file__).parent.parent
     sys.path.insert(0, str(_parent))
-    from skill_executor import create_feishu_client
     from llm_client import chat_completion
 
 logger = logging.getLogger(__name__)
@@ -34,22 +31,25 @@ def execute(user_text: str, context: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         {"text": "..."} 战略分析报告
     """
-    # 读取 SKILL.md 作为 system prompt
-    skill_md = Path(__file__).parent / "BaoAI 战略专家_战略_SKILL.md"
+    skill_dir = Path(__file__).parent
     
-    if not skill_md.exists():
-        logger.error(f"SKILL.md not found at {skill_md}")
+    # 查找 SKILL.md 文件（兼容不同命名）
+    skill_md = None
+    for pattern in ["*SKILL.md", "*.md"]:
+        matches = list(skill_dir.glob(pattern))
+        if matches:
+            skill_md = matches[0]
+            break
+    
+    if not skill_md or not skill_md.exists():
+        logger.error(f"SKILL.md not found in {skill_dir}")
         return {"error": "技能配置文件未找到"}
     
+    logger.info(f"Using skill file: {skill_md.name}")
     system_prompt = skill_md.read_text(encoding="utf-8")
     
-    # 调用 LLM 生成战略分析
     try:
-        reply = chat_completion(
-            user_text,
-            system=system_prompt,
-            max_tokens=4096  # 战略报告通常较长
-        )
+        reply = chat_completion(user_text, system=system_prompt, max_tokens=4096)
         return {"text": reply}
     except Exception as e:
         logger.exception(f"LLM call failed: {e}")
@@ -57,8 +57,7 @@ def execute(user_text: str, context: Dict[str, Any]) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    # 测试
     logging.basicConfig(level=logging.INFO)
-    test_text = "我想做一个 AI 教育产品，帮我分析市场机会"
-    result = execute(test_text, {"chat_id": "test", "user_id": "test"})
-    print(result.get("text", result.get("error")))
+    test_text = "我想做一个 AI 教育产品，帮我分析市场"
+    result = execute(test_text, {"chat_id": "test"})
+    print(result.get("text", result.get("error"))[:200])
