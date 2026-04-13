@@ -55,6 +55,7 @@ import lark_oapi as lark
 from lark_oapi.api.im.v1 import *
 
 from llm_client import PackyApiError, chat_completion
+from skill_router import select_skill_system
 
 # 长连接可能对同一事件至少投递一次以上：按 message_id + event_id 幂等去重
 _dedupe_lock = threading.Lock()
@@ -160,7 +161,7 @@ def _process_im_message(data: P2ImMessageReceiveV1) -> None:
         reply_plain = "请发送文本消息\nPlease send a text message"
     else:
         try:
-            reply_plain = chat_completion(res_content)
+            reply_plain = chat_completion(res_content, system=select_skill_system(res_content))
         except PackyApiError as e:
             reply_plain = str(e)
         except Exception as e:

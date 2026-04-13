@@ -41,7 +41,23 @@ def _anthropic_message_to_text(message: Any) -> str:
     raise PackyApiError("MiniMax 无文本回复（仅 thinking 等）")
 
 
-def _minimax_anthropic(user_text: str) -> str:
+def _effective_system(override: str | None) -> str:
+    if override is not None:
+        s = override.strip()
+        if s:
+            return s
+    return (
+        os.getenv("MINIMAX_SYSTEM")
+        or os.getenv("SYSTEM_PROMPT")
+        or "You are a helpful assistant."
+    ).strip()
+
+
+def _minimax_anthropic(
+    user_text: str,
+    system_override: str | None = None,
+    max_tokens_override: int | None = None,
+) -> str:
     """MiniMax via Anthropic-compatible API (官方文档 base_url + messages.create)."""
     import anthropic
 
@@ -53,12 +69,11 @@ def _minimax_anthropic(user_text: str) -> str:
 
     base = (os.getenv("ANTHROPIC_BASE_URL") or "https://api.minimax.io/anthropic").rstrip("/")
     model = (os.getenv("MINIMAX_MODEL") or "MiniMax-M2.7").strip()
-    max_tokens = int(os.getenv("MINIMAX_MAX_TOKENS") or "4096")
-    system = (
-        os.getenv("MINIMAX_SYSTEM")
-        or os.getenv("SYSTEM_PROMPT")
-        or "You are a helpful assistant."
-    ).strip()
+    if max_tokens_override is not None:
+        max_tokens = max_tokens_override
+    else:
+        max_tokens = int(os.getenv("MINIMAX_MAX_TOKENS") or "4096")
+    system = _effective_system(system_override)
 
     client = anthropic.Anthropic(api_key=api_key, base_url=base)
     message = client.messages.create(
@@ -75,7 +90,11 @@ def _minimax_anthropic(user_text: str) -> str:
     return _anthropic_message_to_text(message)
 
 
-def _packy_openai(user_text: str) -> str:
+def _packy_openai(
+    user_text: str,
+    system_override: str | None = None,
+    max_tokens_override: int | None = None,
+) -> str:
     """OpenAI-compatible POST .../chat/completions（Packy 等）。"""
     logging.info("LLM: calling Packy/OpenAI-compatible API (base=%s)", os.getenv("PACKY_API_BASE", "https://www.packyapi.com/v1"))
 
@@ -91,10 +110,17 @@ def _packy_openai(user_text: str) -> str:
         "Authorization": "Bearer {}".format(api_key),
         "Content-Type": "application/json",
     }
-    payload = {
+    system = _effective_system(system_override)
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_text},
+    ]
+    payload: dict[str, Any] = {
         "model": model,
-        "messages": [{"role": "user", "content": user_text}],
+        "messages": messages,
     }
+    if max_tokens_override is not None:
+        payload["max_tokens"] = max_tokens_override
 
     resp = requests.post(url, headers=headers, json=payload, timeout=120)
 
@@ -151,11 +177,19 @@ def _no_packy_fallback() -> bool:
     )
 
 
-def chat_completion(user_text: str) -> str:
+def chat_completion(
+    user_text: str,
+    system: str | None = None,
+    *,
+    max_tokens: int | None = None,
+) -> str:
     """
     优先 MiniMax（已配置 ANTHROPIC_API_KEY 或 MINIMAX_API_KEY 时）；
     失败则回退 Packy（PACKY_API_KEY），除非 LLM_DISABLE_PACKY_FALLBACK=1。
     仅配其一则只走该路。
+
+    system: 非 None 时作为系统提示（覆盖 MINIMAX_SYSTEM / SYSTEM_PROMPT）。
+    max_tokens: 非 None 时覆盖 MINIMAX_MAX_TOKENS（用于路由等短输出）。
     """
     has_minimax = bool(
         (os.getenv("ANTHROPIC_API_KEY") or os.getenv("MINIMAX_API_KEY") or "").strip()
@@ -167,7 +201,7 @@ def chat_completion(user_text: str) -> str:
 
     if has_minimax:
         try:
-            return _minimax_anthropic(user_text)
+            return _minimax_anthropic(user_text, system, max_tokens)
         except Exception as e:
             logging.warning(
                 "MiniMax 调用失败，将尝试说明见下；是否回退 Packy=%s",
@@ -177,7 +211,7 @@ def chat_completion(user_text: str) -> str:
             err_mini = "{}: {}".format(type(e).__name__, e)
             if has_packy and not _no_packy_fallback():
                 try:
-                    return _packy_openai(user_text)
+                    return _packy_openai(user_text, system, max_tokens)
                 except Exception as e2:
                     raise PackyApiError(
                         "MiniMax 失败: {}；备用 Packy 也失败: {}: {}".format(
@@ -188,4 +222,4 @@ def chat_completion(user_text: str) -> str:
                 "MiniMax 失败（未使用或未成功 Packy 备用）: {}".format(err_mini)
             ) from e
 
-    return _packy_openai(user_text)
+    return _packy_openai(user_text, system, max_tokens)

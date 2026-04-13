@@ -4,3 +4,4 @@ python-dotenv>=1.0.0
 python-socks[asyncio]>=2.4.0
 # MiniMax Anthropic-compatible API
 anthropic>=0.40.0
+PyYAML>=6.0.1
